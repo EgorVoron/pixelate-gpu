@@ -1,5 +1,7 @@
 import numpy as np
 import warnings
+from time import time
+from numba import jit
 
 from skimage.color.adapt_rgb import adapt_rgb, each_channel
 from skimage.util import view_as_blocks
@@ -119,7 +121,6 @@ class Pyxelate:
 		# apply adaptive contrast
 		if not override_adapthist:
 			image = self._fix_hist(image)
-
 		# create sample for finding palette
 		if self.regenerate_palette or not self.is_fitted:
 			examples = resize(image[:, :, :3], (32, 32), anti_aliasing=False).reshape(-1, 3).astype("int")
@@ -131,7 +132,9 @@ class Pyxelate:
 		# resize image to 4 times the desired width and height
 		image = resize(image[:, :, :3], (self.height * self.ITER * 2, self.width * self.ITER * 2), anti_aliasing=True)
 		# generate pixelated image with desired width / height
+		t = time()
 		image = self._reduce(image)
+		print('SS:', time()-t)
 
 		# apply palette
 		height, width, depth = image.shape
@@ -284,9 +287,14 @@ class Pyxelate:
 			for n in range(self.ITER):
 				h, w = dim.shape
 				h, w = h // 2, w // 2
+				tt = time()
 				flatten = view_as_blocks(dim, (2, 2)).reshape(-1, 2, 2)
+				print('flatten:', time() - tt)
 				# bottleneck
+				tt = time()
+				# slow one upper
 				new_image = np.fromiter((self._reduce_conv(f) for f in flatten), flatten.dtype).reshape((h, w))
+				print('bottleneck:', time()-tt)
 				if n < self.ITER - 1:
 					dim = new_image.copy()
 			return new_image
@@ -294,6 +302,7 @@ class Pyxelate:
 		return _wrapper(image)
 
 	def _reduce_conv(self, f):
+		# slow one lower
 		"""The actual function that selects the right pixels based on the gradients  2x2 square"""
 		return np.mean(f[self.SOLUTIONS[
 			np.argmax(np.sum(np.multiply(self.CONVOLUTIONS, f.reshape(-1, 2, 2)).reshape(-1, 4), axis=1))]])
@@ -323,3 +332,20 @@ class Pyxelate:
 	def _is_transparent(image):
 		"""Returns True if there is an additional dimension for transparency"""
 		return bool(image.shape[2] == 4)
+
+from time import time
+from skimage import io
+import matplotlib.pyplot as plt
+img = io.imread("examples/blade_runner.png")
+# generate pixel art that is 1/14 the size
+height, width, _ = img.shape
+factor = 5
+colors = 6
+dither = True
+t = time()
+p = Pyxelate(height // factor, width // factor, colors, dither)
+img_small = p.convert(img)  # convert an image with these settings
+print(time()-t)
+print(type(img_small))
+plt.imshow(img_small)
+plt.show()
